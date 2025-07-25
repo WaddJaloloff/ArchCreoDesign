@@ -16,9 +16,7 @@ from geopy.distance import geodesic
 
 
 # AIzaSyDIbzNUYOu2QRbxP45wk2YfLHndauvwOh0
-payme_provider_token = "371317599:TEST:1728755041870"
-click_provider_token = "398062629:TEST:999999999_F91D8F69C042267444B74CC0B3C747757EB0E065"
-bot = telebot.TeleBot("7484059552:AAFJVOKnQyIZhX_g68WxUAHif2G59ybyvH0")
+bot = telebot.TeleBot("Bot_token")
 emoji_mapping = {str(i): f"{i}️⃣" for i in range(10)}
 
 
