@@ -1,4 +1,15 @@
+import sys
+import os
 
+# STEP 1: Django settings path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'archcreodesign.settings')
+
+# STEP 2: Django init
+import django
+django.setup()
+
+# STEP 3: Django model va boshqa importlar (shu yerda import qiling)
 from telebot.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -7,17 +18,16 @@ from telebot.types import (
     ReplyKeyboardRemove,
     InputMediaPhoto
 )
-from django.db import models  # bu kerak
-
-from django.conf import settings
 from collections import defaultdict
 import threading
 import sqlite3, re, traceback, requests, os, time, telebot
+
+# STEP 4: Django model importlari – django.setup() DAN KEYIN!
 from app.models import Loyihalar, Kategoriyalar, telegram_user
 
+# STEP 5: Bot ishga tushirish
+bot = telebot.TeleBot("7484059552:AAGE2NqR-vwBEoxvnCzCP4v_c6ytMceNLbQ", parse_mode='HTML')
 
-
-bot = telebot.TeleBot("7344038505:AAGnvkY-coj0HHpIbqspsiUABWATBOoOKGA", parse_mode='HTML')
 
 
 
@@ -324,72 +334,72 @@ def parse_coordinates(value):
 
 
 
-
+from django.db import models
+from django.db.models import Count
 
 def menu(input_data):
-    message = input_data.message if hasattr(input_data, 'message') else input_data
+    message = getattr(input_data, 'message', input_data)
     chat_id = message.chat.id
 
     markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     qs = (Loyihalar.objects.filter(Active=True)
-      .values('Kategoriyasi__Nomi')
-      .annotate(count=models.Count('id')))
+          .values('Kategoriyasi__Nomi')
+          .annotate(count=Count('id')))
 
     buttons = [KeyboardButton(f"{c['Kategoriyasi__Nomi']} ({c['count']})") for c in qs]
-    buttons = buttons or []
-    last_btn = KeyboardButton("🔙 Orqaga qaytish")
 
     if buttons:
         if len(buttons) > 2:
             markup.add(buttons[0])
             for i in range(1, len(buttons), 2):
                 markup.add(*buttons[i:i+2])
-            markup.add(last_btn)
         else:
             markup.row(*buttons)
-            markup.add(last_btn)
-    else:
-        markup.add(last_btn)
 
+    markup.add(KeyboardButton("🔙 Orqaga qaytish"))
     bot.send_message(chat_id, "Tanlashingiz mumkin:", reply_markup=markup)
     bot.register_next_step_handler(message, menudan)
+
 
 def menudan(message):
     chat_id = message.chat.id
     text = message.text.strip()
 
     if user_last_message.get(chat_id) == text:
-        bot.register_next_step_handler(message, menudan)
-        return
+        return bot.register_next_step_handler(message, menudan)
+    
     user_last_message[chat_id] = text
 
     if text.lower() == "/start":
-        send_welcome(message)
-        return
+        return send_welcome(message)
 
     category_names = list(Kategoriyalar.objects.values_list('Nomi', flat=True))
-    pattern = rf"({'|'.join(re.escape(nome) for nome in category_names)}) \(\d+\)"
+    pattern = rf"({'|'.join(re.escape(n) for n in category_names)}) \(\d+\)"
+    
     if re.fullmatch(pattern, text):
-        category(message, message.from_user.id)
-    elif text == "🔙 Orqaga qaytish":
-        bosh_menu(message)
-    else:
-        bot.register_next_step_handler(message, menudan)
+        return category(message, message.from_user.id)
+
+    if text == "🔙 Orqaga qaytish":
+        return bosh_menu(message)
+
+    bot.register_next_step_handler(message, menudan)
+
 
 def category(message, user_id, orqagaQaytish=False):
-
     chat_id = message.chat.id
     text = message.text.rsplit(" (", 1)[0]
 
     try:
         cat = Kategoriyalar.objects.get(Nomi=text)
     except Kategoriyalar.DoesNotExist:
-        bot.send_message(chat_id, "Bunday kategoriya topilmadi.")
-        return
+        return bot.send_message(chat_id, "Bunday kategoriya topilmadi.")
 
-    projects = Loyihalar.objects.filter(Kategoriyasi=cat)
-    dict_1 = {}
-    all_btns, act_btns = [], []
+    projects = Loyihalar.objects.filter(Kategoriyasi=cat).only("id", "Nomi", "Active")
+    if not projects.exists():
+        return bot.send_message(chat_id, "Bu kategoriyada loyiha mavjud emas.")
+
+    dict_1, all_btns, act_btns = {}, [], []
+
     for p in projects:
         label = p.Nomi if p.Active else f"❗️{p.Nomi}"
         dict_1[label] = p.id
@@ -398,12 +408,9 @@ def category(message, user_id, orqagaQaytish=False):
         if p.Active:
             act_btns.append(btn)
 
-    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    if act_btns:
-        btns = act_btns
-    else:
-        btns = all_btns
+    btns = act_btns if act_btns else all_btns
 
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     for i in range(0, len(btns), 2):
         markup.add(*btns[i:i+2])
     markup.add(KeyboardButton("🔙 Menuga qaytish"))
@@ -413,68 +420,65 @@ def category(message, user_id, orqagaQaytish=False):
         message.text = single.text
         bot.send_message(chat_id, f"{text} da faqat 1ta loyiha: <b>{single.text}</b>",
                          parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-        product(message, dict_1)
-        return
+        return product(message, dict_1)
 
-    # sokin ko'rinish uchun rasm
     try:
-        with open(cat.rasmni.path, "rb") as img:
-            bot.send_photo(chat_id, img, caption=text, reply_markup=markup)
+        if cat.rasmni and os.path.exists(cat.rasmni.path):
+            with open(cat.rasmni.path, "rb") as img:
+                bot.send_photo(chat_id, img, caption=text, reply_markup=markup)
+        else:
+            raise FileNotFoundError("Kategoriya rasmi topilmadi.")
     except Exception as e:
-        print(f"Kategoriya rasmi topilmadi: {e}")
+        print(f"[Xato] Kategoriya rasmi: {e}")
         bot.send_message(chat_id, text, reply_markup=markup)
 
     bot.register_next_step_handler(message, lambda msg: product(msg, dict_1))
 
-def get_photos_by_group_id(chat_id, media_group_id):
-    # moslash kerak, Django marshrutga muvofiq saqlagan bo‘lsangiz
-    from app.models import Rasmlar  # agar maxsus model bo‘lsa
-    try:
-        photos = Rasmlar.objects.filter(media_group_id=media_group_id)
-    except:
-        return None
-    media = []
-    for i, instance in enumerate(photos):
-        photo = open(instance.file_path, 'rb')
-        media.append(InputMediaPhoto(photo))
-    return media
 
 def product(message, dict_1=None):
     chat_id = message.chat.id
     label = message.text.strip()
+
     if user_last_message.get(chat_id) == label:
-        bot.register_next_step_handler(message, lambda m: product(m, dict_1))
-        return
+        return bot.register_next_step_handler(message, lambda m: product(m, dict_1))
+    
     user_last_message[chat_id] = label
 
-    if label in dict_1:
-        proj_id = dict_1[label]
-        try:
-            p = Loyihalar.objects.get(pk=proj_id)
-        except Loyihalar.DoesNotExist:
-            bot.send_message(chat_id, "Loyiha topilmadi.")
-            return
-        media_group = []
-
-
-        for fname in ('Rasm_1','Rasm_2','Rasm_3','Rasm_4','Rasm_5','Rasm_6'):
-            img = getattr(p, fname)
-            if img:
-                media_group.append(InputMediaPhoto(open(img.path, 'rb')))
-        if media_group:
-            bot.send_media_group(chat_id, media_group)
-        bot.send_message(chat_id,
-                        f"Nomi: <b>{p.Nomi}</b>\n\nTavsif: {p.Tavsifi}",
-                        parse_mode="HTML",
-                        reply_markup=productTugma(p.id))
-        bot.register_next_step_handler(message, lambda msg: product(msg, dict_1))
-    elif label == "🔙 Menuga qaytish":
+    if label == "🔙 Menuga qaytish":
         message.text = "📋 Loyihalarimiz"
-        menu(message)
-    else:
-        bot.register_next_step_handler(message, lambda m: product(m, dict_1))
+        return menu(message)
 
+    proj_id = dict_1.get(label)
+    if not proj_id:
+        return bot.register_next_step_handler(message, lambda m: product(m, dict_1))
 
+    try:
+        p = Loyihalar.objects.get(pk=proj_id)
+    except Loyihalar.DoesNotExist:
+        return bot.send_message(chat_id, "Loyiha topilmadi.")
+
+    media_group = []
+
+    for fname in ('Rasm_1', 'Rasm_2', 'Rasm_3', 'Rasm_4', 'Rasm_5', 'Rasm_6'):
+        img = getattr(p, fname)
+        if img and hasattr(img, 'path') and os.path.exists(img.path):
+            try:
+                media_group.append(InputMediaPhoto(open(img.path, 'rb')))
+            except Exception as e:
+                print(f"[Xato] Rasm yuklash: {e}")
+
+    if media_group:
+        try:
+            bot.send_media_group(chat_id, media_group)
+        except Exception as e:
+            print(f"[Xato] Media group yuborilmadi: {e}")
+
+    bot.send_message(chat_id,
+                     f"Nomi: <b>{p.Nomi}</b>\n\nTavsif: {p.Tavsifi}",
+                     parse_mode="HTML",
+                     reply_markup=productTugma(p.id))
+
+    bot.register_next_step_handler(message, lambda m: product(m, dict_1))
 
 
 @bot.callback_query_handler(func=lambda call: True)

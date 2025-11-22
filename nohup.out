@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/root/ArchCreoDesign/server_bot.py", line 2, in <module>
+    from telebot.types import (
+ModuleNotFoundError: No module named 'telebot'
+python: can't open file '/root/ArchCreoDesign/server_bot.py': [Errno 2] No such file or directory
+Traceback (most recent call last):
+  File "/root/ArchCreoDesign/bot/server_bot.py", line 16, in <module>
+    from app.models import Loyihalar, Kategoriyalar, telegram_user
+ModuleNotFoundError: No module named 'app'
